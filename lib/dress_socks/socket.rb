@@ -1,17 +1,17 @@
 module DressSocks
   class Socket < ::TCPSocket
     attr_accessor :socks_server, :socks_port, :socks_version, :socks_ignores, :socks_username, :socks_password
-  
+
     alias :initialize_tcp :initialize
-  
+
 
     def encoded_socks_version
       (self.socks_version == "4a" or self.socks_version == "4") ? "\004" : "\005"
     end
 
     # See http://tools.ietf.org/html/rfc1928
-    def initialize(remote_host=nil, remote_port=0, local_host=nil, local_port=nil, 
-                   socks_username: nil, socks_password: nil, socks_server: nil, socks_port: nil, 
+    def initialize(remote_host=nil, remote_port=0, local_host=nil, local_port=nil,
+                   socks_username: nil, socks_password: nil, socks_server: nil, socks_port: nil,
                    socks_ignores: [], socks_version: '5')
 
       self.socks_server = socks_server
@@ -24,9 +24,9 @@ module DressSocks
 
       if socks_server and socks_port and not socks_ignores.include?(remote_host)
         initialize_tcp socks_server, socks_port
-  
+
         socks_authenticate unless socks_version =~ /^4/
-  
+
         if remote_host
           socks_connect(remote_host, remote_port)
         end
@@ -34,7 +34,7 @@ module DressSocks
         initialize_tcp remote_host, remote_port, local_host, local_port
       end
     end
-  
+
     # Authentication
     def socks_authenticate
       if self.socks_username || self.socks_password
@@ -69,7 +69,7 @@ module DressSocks
         end
       end
     end
-  
+
     # Connect
     def socks_connect(host, port)
       port = ::Socket.getservbyname(port) if port.is_a?(String)
@@ -78,7 +78,7 @@ module DressSocks
       req << "\001"
       req << "\000" if self.socks_version == "5"
       req << [port].pack('n') if self.socks_version =~ /^4/
-  
+
       if self.socks_version == "4"
         host = Resolv::DNS.new.getaddress(host).to_s
       end
@@ -106,10 +106,10 @@ module DressSocks
       req << [port].pack('n') if self.socks_version == "5"
 
       write req
-  
+
       socks_receive_reply
     end
-  
+
     # returns [bind_addr: String, bind_port: Fixnum]
     def socks_receive_reply
       if self.socks_version == "5"
@@ -147,7 +147,7 @@ module DressSocks
                           ip6 += ":"
                         end
                         i += 1
-  
+
                         ip6 += b.to_s(16).rjust(2, '0')
                       end
                     end
