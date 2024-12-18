@@ -12,7 +12,7 @@ module DressSocks
     # See http://tools.ietf.org/html/rfc1928
     def initialize(remote_host=nil, remote_port=0, local_host=nil, local_port=nil,
                    socks_username: nil, socks_password: nil, socks_server: nil, socks_port: nil,
-                   socks_ignores: [], socks_version: '5', timeout_duration: 30)
+                   socks_ignores: [], socks_version: '5', timeout_duration: 25)
 
       self.socks_server = socks_server
       self.socks_port = socks_port
