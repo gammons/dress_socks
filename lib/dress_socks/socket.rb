@@ -1,6 +1,6 @@
 module DressSocks
   class Socket < ::TCPSocket
-    attr_accessor :socks_server, :socks_port, :socks_version, :socks_ignores, :socks_username, :socks_password
+    attr_accessor :socks_server, :socks_port, :socks_version, :socks_ignores, :socks_username, :socks_password, :timeout_duration
 
     alias :initialize_tcp :initialize
 
@@ -12,7 +12,7 @@ module DressSocks
     # See http://tools.ietf.org/html/rfc1928
     def initialize(remote_host=nil, remote_port=0, local_host=nil, local_port=nil,
                    socks_username: nil, socks_password: nil, socks_server: nil, socks_port: nil,
-                   socks_ignores: [], socks_version: '5')
+                   socks_ignores: [], socks_version: '5', timeout_duration: 30)
 
       self.socks_server = socks_server
       self.socks_port = socks_port
@@ -21,14 +21,11 @@ module DressSocks
       self.socks_ignores = socks_ignores
       self.socks_version = socks_version
 
-
       if socks_server and socks_port and not socks_ignores.include?(remote_host)
-        initialize_tcp socks_server, socks_port
-
-        socks_authenticate unless socks_version =~ /^4/
-
-        if remote_host
-          socks_connect(remote_host, remote_port)
+        Timeout.timeout(timeout_duration) do
+          initialize_tcp socks_server, socks_port
+          socks_authenticate unless socks_version =~ /^4/
+          socks_connect(remote_host, remote_port) if remote_host
         end
       else
         initialize_tcp remote_host, remote_port, local_host, local_port
