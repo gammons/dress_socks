@@ -20,29 +20,53 @@ module DressSocks
       self.socks_password = socks_password
       self.socks_ignores = socks_ignores
       self.socks_version = socks_version
+      self.timeout_duration = timeout_duration
 
       if socks_server and socks_port and not socks_ignores.include?(remote_host)
         tcp_open = false
         handshake_complete = false
         begin
-          Timeout.timeout(timeout_duration) do
-            initialize_tcp socks_server, socks_port
-            tcp_open = true
-            socks_authenticate unless socks_version =~ /^4/
-            socks_connect(remote_host, remote_port) if remote_host
-          end
+          # Both phases are bounded synchronously. Timeout.timeout raises from
+          # a watchdog thread, which can fire after the block has already
+          # exited and land in whatever the caller runs next -- in our case an
+          # ActiveRecord save on a pooled connection.
+          initialize_tcp socks_server, socks_port, connect_timeout: timeout_duration
+          tcp_open = true
+          # Bounds the blocking recv calls in socks_authenticate and
+          # socks_connect. Raises from the read itself, at a known point.
+          self.timeout = timeout_duration
+          socks_authenticate unless socks_version =~ /^4/
+          socks_connect(remote_host, remote_port) if remote_host
+          # This socket is handed to Net::SMTP, which manages its own much
+          # longer read_timeout through its own buffered-IO layer. Leaving the
+          # short handshake bound on the underlying IO would fire during
+          # normal SMTP reads and break unrelated behaviour.
+          self.timeout = nil
           handshake_complete = true
+        rescue IO::TimeoutError, Errno::EAGAIN
+          # connect_timeout: raises IO::TimeoutError; IO#timeout raises
+          # Errno::EAGAIN. Neither is handled by the downstream SMTP caller,
+          # which rescues Timeout::Error and maps it to a retry. Re-raise as
+          # the class the existing chain is built on, so the only thing that
+          # changes is where the error comes from, not how it is handled.
+          raise Timeout::Error, timeout_message(tcp_open)
         ensure
-          # Timeout.timeout can fire after the TCP connect but before the
-          # handshake finishes. The caller never receives this object in that
-          # case, so nothing else can close the descriptor. Guard on tcp_open
-          # so we never call closed? on an uninitialized stream, which raises
-          # IOError.
+          # A timeout, or any SOCKSError, can land after the TCP connect but
+          # before the handshake finishes. The caller never receives this
+          # object in that case, so nothing else can close the descriptor.
+          # Guard on tcp_open so we never call closed? on an uninitialized
+          # stream, which raises IOError.
           close if tcp_open && !handshake_complete && !closed?
         end
       else
         initialize_tcp remote_host, remote_port, local_host, local_port
       end
+    end
+
+    def timeout_message(tcp_open)
+      phase = tcp_open ? 'SOCKS handshake with' : 'connect to SOCKS proxy'
+      "#{phase} #{self.socks_server}:#{self.socks_port} timed out " \
+        "after #{self.timeout_duration} seconds"
     end
 
     # Authentication
