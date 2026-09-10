@@ -22,10 +22,23 @@ module DressSocks
       self.socks_version = socks_version
 
       if socks_server and socks_port and not socks_ignores.include?(remote_host)
-        Timeout.timeout(timeout_duration) do
-          initialize_tcp socks_server, socks_port
-          socks_authenticate unless socks_version =~ /^4/
-          socks_connect(remote_host, remote_port) if remote_host
+        tcp_open = false
+        handshake_complete = false
+        begin
+          Timeout.timeout(timeout_duration) do
+            initialize_tcp socks_server, socks_port
+            tcp_open = true
+            socks_authenticate unless socks_version =~ /^4/
+            socks_connect(remote_host, remote_port) if remote_host
+          end
+          handshake_complete = true
+        ensure
+          # Timeout.timeout can fire after the TCP connect but before the
+          # handshake finishes. The caller never receives this object in that
+          # case, so nothing else can close the descriptor. Guard on tcp_open
+          # so we never call closed? on an uninitialized stream, which raises
+          # IOError.
+          close if tcp_open && !handshake_complete && !closed?
         end
       else
         initialize_tcp remote_host, remote_port, local_host, local_port
