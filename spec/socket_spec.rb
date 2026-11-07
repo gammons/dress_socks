@@ -67,6 +67,33 @@ RSpec.describe DressSocks::Socket, '#initialize' do
     server
   end
 
+  # Closes the connection as soon as it has read the method negotiation,
+  # without answering it.
+  def server_closing_before_auth_reply
+    server = listener
+    threads << Thread.new do
+      client = server.accept
+      client.recv(3)
+      client.close
+    end
+    server
+  end
+
+  # Answers the SOCKS5 method negotiation, reads the connect request and
+  # closes the connection without replying to it, as a proxy that drops the
+  # connection mid-handshake does.
+  def server_closing_after_auth
+    server = listener
+    threads << Thread.new do
+      client = server.accept
+      client.recv(3)
+      client.write("\005\000")
+      client.recv(512)
+      client.close
+    end
+    server
+  end
+
   # A port that was bound and immediately released, so a connect to it is
   # refused rather than hanging.
   def closed_port
@@ -167,6 +194,42 @@ RSpec.describe DressSocks::Socket, '#initialize' do
                             socks_server: '127.0.0.1', socks_port: port,
                             timeout_duration: TIMEOUT)
       end.to raise_error(Errno::ECONNREFUSED)
+    end
+
+    # Since Ruby 3.3, recv returns nil rather than "" once the peer has
+    # closed the connection, so an EOF must still surface as a SOCKSError,
+    # which callers handle, and not as a NoMethodError on nil.
+    it 'raises SOCKSError when the proxy closes before the authentication reply' do
+      server = server_closing_before_auth_reply
+
+      expect do
+        described_class.new('mx.example.com', 25,
+                            socks_server: '127.0.0.1', socks_port: port_of(server),
+                            timeout_duration: TIMEOUT)
+      end.to raise_error(DressSocks::SOCKSError, "Server doesn't reply authentication")
+    end
+
+    it 'raises SOCKSError when the proxy closes before the connect reply' do
+      server = server_closing_after_auth
+
+      expect do
+        described_class.new('mx.example.com', 25,
+                            socks_server: '127.0.0.1', socks_port: port_of(server),
+                            timeout_duration: TIMEOUT)
+      end.to raise_error(DressSocks::SOCKSError, "Server doesn't reply")
+    end
+
+    it 'closes the descriptor when the proxy closes before the connect reply' do
+      server = server_closing_after_auth
+      socket = described_class.allocate
+
+      expect do
+        socket.__send__(:initialize, 'mx.example.com', 25,
+                        socks_server: '127.0.0.1', socks_port: port_of(server),
+                        timeout_duration: TIMEOUT)
+      end.to raise_error(DressSocks::SOCKSError)
+
+      expect(socket).to be_closed
     end
 
     it 'leaves a successful connection open' do

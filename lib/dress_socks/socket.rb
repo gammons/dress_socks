@@ -76,10 +76,7 @@ module DressSocks
       else
                 write "\005\001\000"
       end
-      auth_reply = recv(2)
-      if auth_reply.empty?
-        raise DressSocks::SOCKSError.new("Server doesn't reply authentication")
-      end
+      auth_reply = socks_recv(2, "Server doesn't reply authentication")
       if auth_reply[0..0] != "\004" and auth_reply[0..0] != "\005"
         raise DressSocks::SOCKSError.new("SOCKS version #{auth_reply[0..0]} not supported")
       end
@@ -93,7 +90,7 @@ module DressSocks
         auth += self.socks_password.to_s.length.chr
         auth += self.socks_password.to_s
         write auth
-        auth_reply = recv(2)
+        auth_reply = socks_recv(2, "Server doesn't reply authentication")
         if auth_reply[1..1] != "\000"
           raise DressSocks::SOCKSError.new("SOCKS authentication failed")
         end
@@ -147,10 +144,7 @@ module DressSocks
     # returns [bind_addr: String, bind_port: Fixnum]
     def socks_receive_reply
       if self.socks_version == "5"
-        connect_reply = recv(4)
-        if connect_reply.empty?
-          raise DressSocks::SOCKSError.new("Server doesn't reply")
-        end
+        connect_reply = socks_recv(4, "Server doesn't reply")
         if connect_reply[0..0] != "\005"
           raise DressSocks::SOCKSError.new("SOCKS version #{connect_reply[0..0]} is not 5")
         end
@@ -161,13 +155,13 @@ module DressSocks
                 when "\001"
                   4
                 when "\003"
-                  recv(1).bytes.first
+                  socks_recv(1, "Server doesn't reply").bytes.first
                 when "\004"
                   16
                 else
                   raise DressSocks::SOCKSError.for_response_code(connect_reply.bytes.to_a[3])
                 end
-        bind_addr_s = recv(bind_addr_len)
+        bind_addr_s = socks_recv(bind_addr_len, "Server doesn't reply")
         bind_addr = case connect_reply[3..3]
                     when "\001"
                       bind_addr_s.bytes.to_a.join('.')
@@ -185,14 +179,27 @@ module DressSocks
                         ip6 += b.to_s(16).rjust(2, '0')
                       end
                     end
-        bind_port = recv(bind_addr_len + 2)
+        bind_port = socks_recv(bind_addr_len + 2, "Server doesn't reply")
         [bind_addr, bind_port.unpack('n')]
       else
-        connect_reply = recv(8)
+        connect_reply = socks_recv(8, "Server doesn't reply")
         unless connect_reply[0] == "\000" and connect_reply[1] == "\x5A"
           raise DressSocks::SOCKSError.new("Failed while connecting througth socks")
         end
       end
+    end
+
+    private
+
+    # Reads a handshake reply. A proxy that closes the connection mid-handshake
+    # is a SOCKS failure like any other, so it raises SOCKSError, which callers
+    # already handle. Since Ruby 3.3, recv returns nil rather than "" when the
+    # peer has closed the connection, so both have to be checked.
+    def socks_recv(length, eof_message)
+      reply = recv(length)
+      raise DressSocks::SOCKSError.new(eof_message) if reply.nil? || reply.empty?
+
+      reply
     end
   end
 end
